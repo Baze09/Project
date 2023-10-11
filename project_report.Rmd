@@ -1,0 +1,460 @@
+---
+title: "Group 3 Data Cleaning and Analysis"
+author: "Anum, Blagoja, Hannah, Nolan" 
+date: "Final Report Due Monday, March 13, 2023"
+output: 
+  github_document: 
+    toc: true
+    toc_depth: 2
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include = FALSE}
+# This setup chunk sets global defaults and includes the tidyverse packages
+# The option include = FALSE prevents warnings and messages from printing to your report.
+# Change the next option to echo = TRUE to hide code chunks by default 
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(janitor)
+```
+
+# Introduction
+
+Project Proposal:
+<https://docs.google.com/document/d/12Ly0ewjRK-uhTVQvT38E0vjMvc8uvwr67GpmBKwA2ak/edit?usp=sharing>
+
+In this project, we are going to be using the two datasets that we found
+on Kaggle: "Highest Holywood Grossing Movies.csv" and
+"imdb_top_1000.csv". We would be renaming them as
+'Highest_Holywood_Grossing_Movies' and 'imdb_top_1000' dataframes to
+work with in our project.
+
+## Information about each datasets from the project
+
+### Highest Holywood Grossing Movies.csv dataset
+
+Data frame Highest_Holywood_Grossing_Movies:  
+Rows: 918.  
+Columns: 11.  
+Variables (Column Names): Title, Movie Info, Distributor, Release Date,
+Domestic Sales, International Sales, World Sales, Genre, Movie Runtime,
+and License.
+
+### imdb_top_1000.csv dataset
+
+Data frame imdb_top_1000:  
+Columns: 16  
+Rows: 1,000  
+Variables (Column Names): Poster_Link, Series_Title, Released_Year, Certificate, Runtime,
+Genre, IMDB_Rating, Overview, Meta_score, Director, Star1, Star2, Star3,
+Star4, No_of_votes, and Gross.
+
+## Target variables of Data Science Project
+
+The variables that we are going to work with from the two datasets are
+Title, Release Year, Runtime, Genre, Domestic Gross, World Gross,
+Distributor, and perhaps others.  
+
+In terms of variables we will create, we are interested in perhaps
+trying to create a new categorical variable of the gender of different
+lead actors, separating the different genres movies are classified in,
+and other depending on which questions we choose to focus on.  
+
+### Call to the original two datasets:
+
+```{r data, echo = TRUE}
+gross <- read_csv("data/Highest Holywood Grossing Movies.csv")
+imdb <- read_csv("data/imdb_top_1000.csv")
+
+glimpse(gross)
+glimpse(imdb)
+
+
+```
+
+### Tidying of the IMDB dataset:
+
+```{r imdb_tidy, echo = TRUE}
+#imdb2: clean names, rename some variables, select vars, add wrong data point.
+imdb2 <- imdb %>%
+clean_names() %>%
+rename(title = series_title) %>%
+select(-poster_link)
+# there's no reason to use Base R for this
+imdb2$released_year <- replace(imdb2$released_year, 967, "1995")
+
+glimpse(imdb2)
+
+```
+
+### Tidying of the Top Grossing Movies dataset:
+
+```{r gross_tidy, echo = TRUE}
+#gross2: clean names, rename vars, fix runtime variable
+gross2 <- gross %>%
+  clean_names() %>%
+  rename(runtime = movie_runtime) %>%
+  mutate(hours = word(runtime, 1), minutes = word(runtime, 3)) %>%
+  select(-runtime) %>%
+  mutate(hours = parse_number(hours)) %>%
+  mutate(minutes = parse_number(minutes)) %>%
+  mutate(hours = hours * 60) %>%
+  mutate(runtime = hours + minutes) %>%
+  select(-hours, -minutes)
+  
+#gross3: tidy title variable.
+gross3 <- gross2 %>%
+  separate(title, into= c("movie_title", "extra_year"), sep="\\(") %>%
+  select(-extra_year)
+
+#gross4: create action/comedy/drama var.
+gross4 <- gross3 %>%
+  mutate(action = if_else(str_detect(genre, "Action")==TRUE, "Y" , "N"),
+         comedy = if_else(str_detect(genre, "Comedy")==TRUE, "Y" , "N"),
+         drama = if_else(str_detect(genre, "Drama")==TRUE, "Y" , "N"))
+
+
+#gross5: create combo var from action/comedy/drama vars.
+gross5 <- gross4 %>%
+  mutate(combo = if_else(str_detect(action, "Y") & str_detect(comedy, "Y")& str_detect(drama, "Y"), "Action, Comedy, and Drama" ,
+                 if_else(str_detect(action, "Y") & str_detect(comedy,"N") & str_detect(drama,"N") , "Action only" ,
+                 if_else(str_detect(action, "N") & str_detect(comedy,"Y") & str_detect(drama,"N") , "Comedy only" ,
+                 if_else(str_detect(action, "N") & str_detect(comedy,"N") & str_detect(drama,"Y") , "Drama only"  ,
+                 if_else(str_detect(action, "N") & str_detect(comedy,"Y") & str_detect(drama,"Y") , "Drama and Comedy" ,
+                 if_else(str_detect(action, "Y") & str_detect(comedy,"N") & str_detect(drama,"Y") , "Drama and Action" ,
+                 if_else(str_detect(action, "Y") & str_detect(comedy,"N") & str_detect(drama,"Y") , "Drama and Action" ,
+                 "Neither"))))))))
+
+#gross6: rename/edit variables, trim title var.
+gross6 <- gross5 %>%
+  select(-x1) %>%
+  rename(title = movie_title)
+
+gross6$title <- str_trim(gross6$title)
+
+glimpse(gross6)
+
+```
+
+### Creation of merge dataset:
+
+```{r merge_tidy, echo = TRUE}
+#Combine gross6 and imdb2 into the merge dataset, and rename some vars, tidy dates, and create month variable.
+merge <- inner_join(gross6, imdb2, by="title") %>%
+  select(title, movie_info, distributor, release_date, released_year, domestic_sales_in, world_sales_in, license, runtime.x, combo, imdb_rating,
+         meta_score, director, star1, no_of_votes) %>%
+  # Can use 1 rename command to handle all of these.
+  rename(dom_sales = domestic_sales_in) %>%
+  rename(world_sales = world_sales_in) %>%
+  rename(runtime = runtime.x) %>%
+  rename(imdb_no_votes = no_of_votes) %>%
+  rename(release_year = released_year) %>%
+  mutate(release_date = as.Date(release_date, "%B %d, %Y"))
+
+merge$month <- format(as.Date(merge$release_date, format="%d/%m/%Y"),"%m")
+merge$month <- as.factor(merge$month)
+
+glimpse(merge)
+
+```
+
+## Data Visualization
+
+### Rating:
+
+```{r rating_an, echo = TRUE}
+
+#IMDB rating by meta-score
+merge %>%
+ ggplot(aes(x = meta_score , y = imdb_rating, color = combo)) +
+ geom_jitter(alpha = .5) +
+ geom_smooth( se = FALSE) +
+ labs(title="Relationship between Meta Score and IMDB ratings", x="Metascore", y="IMDB ratings" , fill = "Genres")
+
+
+merge %>%
+  filter(meta_score>95) %>%
+  arrange(desc(meta_score)) %>%
+  select(title, meta_score, imdb_rating, director)
+
+#Correlation between imdb rating and runtime?
+merge %>%
+  ggplot(aes(x=runtime, y=imdb_rating)) +
+  geom_jitter() +
+  geom_smooth() + 
+  labs(title="Runtime by IMDB rating", x="Movie runtime", y="IMDB rating") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#What is the most common imdb rating?
+merge %>%
+  ggplot(aes(x=factor(imdb_rating))) +
+  geom_bar() + 
+  labs(title="Distribution of IMDB ratings", x="IMDB rating", y="Count") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#What are the films which got the highest IMDB rating?
+merge %>%
+  filter(imdb_rating >= 9) %>%
+  select(title, imdb_rating)
+
+
+```
+
+### Sales:
+
+```{r sales_an, echo = TRUE}
+
+#compare domestic and world sales
+merge %>%
+  ggplot(aes(x=dom_sales, y=world_sales)) +
+  geom_point() +
+  geom_smooth(se=FALSE)+ 
+  labs(title="Domestic by World Sales", x="Domestic Sales", y="World Sales") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Far right outliers
+merge %>%
+  select(title, dom_sales, world_sales, release_year) %>%
+  arrange(desc(world_sales))%>%
+  filter(dom_sales > 6.3e+08) 
+
+#IMDB score and sales
+merge %>%
+  ggplot(aes(x=dom_sales, y=imdb_rating)) +
+  geom_jitter() +
+  geom_smooth() + 
+  labs(title="Domestic Sales by IMDB rating", y="IMDB rating", x="Domestic sales") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#metascore and sales
+merge %>%
+  ggplot(aes(x=dom_sales, y=meta_score)) +
+  geom_jitter() +
+  geom_smooth() + 
+  labs(title="Domestic Sales by Meta score", x="Domestic Sales", y="IMDB rating") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+
+```
+
+### Distributor:
+
+```{r distributor_an, echo = TRUE}
+#List of all different distributors
+merge %>%
+  select(distributor) %>%
+  distinct() %>%
+  arrange(distributor)
+  
+
+#Sales by Dist
+merge %>%
+  group_by(distributor) %>%
+  select(distributor, dom_sales)%>%
+  ggplot() +
+  geom_col(aes(x=fct_infreq(distributor), y=dom_sales, fill=distributor), show.legend = FALSE) +
+  coord_flip() +
+  labs(title="Sales by Distributor", y="Total Domestic Sales", x="Distributor") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Why does Disney have so much more? (ans: has a lot of the top earning movies/has highest quantity in list)
+merge %>%
+  group_by(distributor) %>%
+  filter(dom_sales >= 504481165) %>%
+  select(title, distributor, dom_sales) %>%
+  arrange(desc(dom_sales))
+
+#What is the count of each distributor in the combined dataset?
+merge %>%
+  group_by(distributor) %>%
+  summarise(n=n()) %>%
+  arrange(desc(n)) %>%
+  slice_head(n=10)
+
+#Sale by distributor
+merge %>%
+  ggplot(aes(x=distributor, y= log(dom_sales)))+
+  geom_boxplot()+
+  coord_flip() + 
+  labs(title="Distributor by Domestic Sales", x="Distributor", y="Domestic Sales (log)") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+### Starring actor and director:
+
+```{r director_and_star_an, echo = TRUE}
+#total sales by star1
+merge %>%
+  group_by(star1) %>%
+  summarise(total_sales_star = sum(dom_sales)) %>%
+  select(star1, total_sales_star) %>%
+  slice_head(n=20) %>% 
+  ggplot() +
+  geom_col(aes(y=reorder(star1, total_sales_star), x=total_sales_star, 
+           fill=reorder(star1, total_sales_star)),
+           show.legend = FALSE) + 
+  labs(title="Total Domestic Sales of Movie by Star1", x="Total Sales of Movies with Star1", y="Star1") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Count of most common star
+merge %>%
+  group_by(star1) %>%
+  summarise(n=n()) %>%
+  arrange(desc(n)) %>%
+  slice_head(n=10)
+
+#Most common star1, domestic sales, and IMDB rating
+merge %>%
+ filter( star1 %in% c("Tom Hanks", "Leonardo DiCaprio", "Daniel Radcliffe", "Tom Cruise", "Daniel Craig", "Joe Russo", "Matt Damon", "Christian Bale", "Denzel Washington", "Elijah Wood")) %>%
+ ggplot(aes(x = factor(imdb_rating) , y = dom_sales)) +
+ geom_col()+
+ facet_wrap(~star1) +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+ labs(title="Relationship between IMDB rating and sales base on star1", x="IMDB rating" , y = "Sales")
+
+
+#Total sales by director
+merge %>%
+  group_by(director) %>%
+  summarise(total_sales_dir = sum(dom_sales)) %>%
+  select(director, total_sales_dir) %>%
+  slice_head(n=20) %>% 
+  ggplot() +
+  geom_col(aes(y=reorder(director, total_sales_dir), x=total_sales_dir, 
+           fill=reorder(director, total_sales_dir)),
+           show.legend = FALSE) + 
+  labs(title="Total Domestic Sales of Movie by Director", x="Total Sales of Movies with Director", y="Director") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+#Count of most common director
+merge %>%
+  group_by(director) %>%
+  summarise(n=n()) %>%
+  arrange(desc(n)) %>%
+  slice_head(n=10) # Use pull() here to get the list of names to save for use below.
+# Then you could pipe it in.
+
+
+#Most common director, domestic sales, and IMDB rating
+merge %>%
+ filter( director %in% c("Anthony Russo" ,"Christopher Nolan","Clint Eastwood", "David Fincher","James Cameron","Peter Jackson","Ridley Scott" , "Robert Zemeckis", "Sam Mendes","Steven Spielberg")) %>%
+ ggplot(aes(x = factor(imdb_rating) , y = dom_sales)) +
+ geom_col()+
+ facet_wrap(~director) +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+ labs(title="Relationship between IMDB rating and sales base on director", x="IMDB rating" , y = "Sales")
+
+merge %>%
+  filter( director %in% c("Anthony Russo" ,"Christopher Nolan","Clint Eastwood", "David Fincher","James Cameron","Peter   Jackson","Ridley Scott" , "Robert Zemeckis", "Sam Mendes","Steven Spielberg")) %>%
+  ggplot(aes(x=runtime, y=director)) +
+  geom_boxplot() + 
+  labs(title="Runtime by Director", x="Runtime", y="Director") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+
+### Release month:
+
+```{r month_an, echo = TRUE}
+
+#Graph dom profit by month variable
+merge %>%
+  filter(!is.na(month)) %>%
+  ggplot(aes(x=month, y=dom_sales)) +
+  geom_col(aes(fill=month), show.legend = FALSE) + 
+  labs(title="Domestic Profit by Month", x="Month", y="Domestic Sales") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+  
+#graph world profit by season variable (not very different!)
+merge %>%
+  filter(!is.na(month)) %>%
+  ggplot(aes(x=month, y=world_sales)) +
+  geom_col(aes(fill=month), show.legend = FALSE) + 
+  labs(title="World Profit by Month", x="Month", y="World Sales") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Number of films by month
+merge %>%
+  filter(!is.na(month)) %>%
+  ggplot() +
+  geom_bar(aes(x=month, fill=month), show.legend = FALSE) + 
+  labs(title="Number of Films per Month", x="Month", y="Count") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+### Runtime:
+
+```{r runtime_an, echo = TRUE}
+
+#Runtime and domestic sales
+merge %>%
+  ggplot(aes(x=runtime, y=dom_sales)) +
+  geom_point() +
+  geom_smooth() + 
+  labs(title="Runtime by Domestic Sales", x="Runtime", y="Domestic Sales") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+### Release year:
+
+```{r year_an, echo = TRUE}
+
+#Sales by Year (inflation? popularity of seeing movies?)
+merge %>%
+  ggplot(aes(x=factor(release_year), y=dom_sales)) +
+  geom_jitter() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+  labs(title="Sales by Release Year", x="Release Year", y="Domestic Sales") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Release year by combo / popular genres
+merge %>%
+ ggplot(aes(x = release_year, fill = combo)) +
+ geom_bar() +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+ labs(title="Popular Genres among different years", x="Year", fill = "Genres") +
+ geom_bar(width = 0.5) + 
+  labs(title="Popular Genres by Year", x="Release Year", y="Type(s) of Genre") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+
+### Genre:
+
+```{r genre_an, echo = TRUE}
+
+#Combo and IMDB rating
+ggplot(merge, aes(x=imdb_rating, y=combo)) + 
+  geom_boxplot()+
+  labs(title= "Genre and IMDB rating", x= "imdb rating", y= "combo") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+#IMDB rating with domestic sales and genre
+# Nice graphic, just need to fill in the empty spot at 9.1 so that the scale is numeric
+
+merge %>%
+ggplot(aes(x = factor(imdb_rating) , y = dom_sales , fill = combo)) +
+geom_col() +
+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+labs(title="IMDB Ratings and Domestic Sales in regards to different genres", x="IMDB Rating", y="Domestic Sales" , fill = "Genres") +
+ theme(plot.title = element_text(hjust = 0.5))
+
+merge %>%
+ggplot(aes(x = runtime , y = dom_sales))+
+ geom_point()+
+ geom_smooth(method = "lm" , se = FALSE)+
+ facet_wrap(~combo) +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+ labs(title="Relationships between length of the movies and sales based on their genre", x=" Movie Length", y="Sales") +
+ theme(plot.title = element_text(hjust = 0.025))
+```
